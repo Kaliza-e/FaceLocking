@@ -1,45 +1,90 @@
-# FaceX
+# Face Locking
 
-FaceX is a local webcam face recognition project. It detects faces and five facial landmarks with YuNet, aligns each face to 112 x 112 pixels, extracts a 512-dimensional ArcFace embedding, and compares it with enrolled people. It runs on the CPU and displays names or `Unknown` in an OpenCV window.
+Face Locking is a local webcam face recognition and identity tracking project. It detects faces and five facial landmarks with YuNet, aligns each face to 112 x 112 pixels, extracts a 512-dimensional ArcFace embedding, compares it with enrolled identities, and locks onto a target face across video frames with smile, blink, and position error detection.
 
-## Quick start (Windows PowerShell)
+## Quick Start & Installation
 
-Install 64-bit Python 3.11 or 3.12. Run these commands from the FaceX folder:
+### 1. Prerequisites
+- **Operating System:** Windows, Linux, or macOS with desktop GUI and camera permissions.
+- **Python:** 64-bit Python 3.11 or 3.12 (Python 3.13 is also supported).
+- **Webcam:** Integrated or USB webcam.
+
+### 2. Environment Setup (Windows PowerShell / CMD)
+Run these commands from the `FaceLocking` folder:
 
 ```powershell
+# Create a fresh Python virtual environment
 py -3.12 -m venv .venv
+
+# Activate the virtual environment or run directly using its interpreter
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe init_project.py --download-models
-.\.venv\Scripts\python.exe -m src.camera
-.\.venv\Scripts\python.exe -m src.enroll --name "Your Name"
-.\.venv\Scripts\python.exe -m src.recognize
 ```
 
-Close each camera window with **Q** before starting the next command. Explicit interpreter paths avoid PowerShell activation-policy issues. The original `venv` in this checkout points to a missing Python installation; create a fresh `.venv` instead of reusing it.
+*Note: On Linux/macOS, run `python3 -m venv .venv`, activate with `source .venv/bin/activate`, and run `pip install -r requirements.txt`.*
 
-A project-local Python runtime may also be present from development. If `.tools/python/python.exe` exists, use it directly in place of `.venv/Scripts/python.exe`; it does not require activation. `.tools` is ignored by Git and is not part of the portable project.
+### 3. Download Required Models
+Download YuNet face detector and ArcFace ResNet100 embedding models:
 
-On Linux/macOS, create the environment with `python3 -m venv .venv`, activate with `source .venv/bin/activate`, then use `python` for the commands below. A graphical desktop and camera permissions are required. Install the `opencv-contrib-python` version from requirements.txt, not a headless variant.
+```powershell
+.\.venv\Scripts\python.exe init_project.py --download-models
+```
 
-## Model setup
+This fetches and verifies:
+- `models/detector_yunet.onnx` (YuNet face detector)
+- `models/embedder_arcface.onnx` (ArcFace ResNet100 feature extractor)
+
+### 4. Basic Pipeline Steps
+
+#### Step A: Test Camera
+```powershell
+.\.venv\Scripts\python.exe -m src.camera
+```
+*(Press **Q** or **Escape** to close the camera window)*
+
+#### Step B: Enroll a Target Identity
+```powershell
+.\.venv\Scripts\python.exe -m src.enroll --name "Your Name" --samples 8
+```
+- Keep your face visible under good lighting.
+- Press **Space** to capture each sample when prompted (**Ready** status).
+- Captures are saved to `data/db/face_db.json`.
+
+#### Step C: Live Face Recognition
+```powershell
+.\.venv\Scripts\python.exe -m src.recognize --threshold 0.45 --margin 0.05
+```
+Displays bounding boxes, 5-point landmarks, similarity scores, and recognized names in real-time.
+
+#### Step D: Lock & Track Target Person (Part 2 Pipeline)
+```powershell
+.\.venv\Scripts\python.exe -m src.face_tracking --target "Your Name"
+```
+Locks onto the specified target name, ignores non-target faces, tracks position with EMA smoothing, detects smile/blink/eye-closed states, and calculates normalized horizontal/vertical position errors (`error_x`, `error_y`).
+
+---
+
+## Model Setup & Preprocessing
 
 ```sh
 python init_project.py --download-models
 ```
 
-This downloads YuNet (232,589 bytes) and ArcFace ResNet100 (261,036,388 bytes), verifies their SHA-256 checksums, and installs them under `models/`. Internet is needed only for installing dependencies and downloading models. Existing verified models are reused; different nonempty models are preserved with an error. Empty placeholders are replaced. Without `--download-models`, setup only creates directories.
+This downloads YuNet (232,589 bytes) and ArcFace ResNet100 (261,036,388 bytes), verifies their SHA-256 checksums, and installs them under `models/`. Internet is needed only for installing dependencies and downloading models. Existing verified models are reused.
 
 | File | Source |
 | --- | --- |
 | `models/detector_yunet.onnx` | [OpenCV Zoo YuNet 2023mar](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) |
 | `models/embedder_arcface.onnx` | [ONNX Model Zoo ArcFace ResNet100](https://github.com/onnx/models/tree/main/validated/vision/body_analysis/arcface) |
 
-Default preprocessing is **RGB float32, NCHW, 0-255** (`--preprocessing raw`) for this Model Zoo export. For a compatible external ArcFace model that expects `(RGB - 127.5) / 127.5`, explicitly pass `--preprocessing normalized` to enrollment, evaluation, and recognition. This includes the book's `w600k_r50.onnx` setup. Do not infer preprocessing from the `.onnx` filename. The model must accept `[1,3,112,112]` float32 input and emit 512 features. See the upstream model documentation and licenses before redistributing weights.
+Default preprocessing is **RGB float32, NCHW, 0-255** (`--preprocessing raw`) for this Model Zoo export. For a compatible external ArcFace model that expects `(RGB - 127.5) / 127.5`, explicitly pass `--preprocessing normalized` to enrollment, evaluation, and recognition.
 
-## Enroll a person
+---
+
+## Enrolling an Identity
 
 ```sh
-python -m src.enroll --name "Belise" --samples 8
+python -m src.enroll --name "Kaliza" --samples 8
 python -m src.enroll --name "Isaac" --camera 1
 ```
 
@@ -47,130 +92,60 @@ python -m src.enroll --name "Isaac" --camera 1
 2. Wait for **Ready**, then press **Space** to capture each sample. Change expression and head angle slightly between captures.
 3. After all samples are captured, enrollment saves automatically and closes the camera.
 
-The default is eight captures, at least half a second apart. Faces must be at least 90 pixels across and pass a blur check. At least three samples are required. **Q**, **Escape**, or closing the main window cancels without saving partial enrollment. If needed, adjust `--min-face-size` or `--min-sharpness`; lowering them can admit poorer samples.
+The default is eight captures, at least half a second apart. Faces must be at least 90 pixels across and pass a blur check. At least three samples are required. **Q**, **Escape**, or closing the main window cancels without saving partial enrollment.
 
-To deliberately redo an existing identity:
+To replace an existing identity sample set:
 
 ```sh
-python -m src.enroll --name "Belise" --replace
+python -m src.enroll --name "Kaliza" --replace
 ```
 
-Names are case-sensitive; `Unknown` and `Too small` are reserved. Embeddings are stored in `data/db/face_db.json`; raw photos and camera recordings are not saved. Each identity retains its normalized samples; matching uses their normalized mean. Writes replace the JSON file atomically. Run one enrollment process at a time. Restart recognition after adding or replacing identities.
+Names are case-sensitive; `Unknown` and `Too small` are reserved. Embeddings are stored in `data/db/face_db.json`.
 
-The database records the model hash, preprocessing, and alignment version. A mismatch requires re-enrollment into a new database, preventing comparisons between incompatible embeddings. Use `--db data/db/another.json` consistently to keep separate galleries. Back up the database before manually editing or removing identities.
+---
 
-## Live recognition
+## Live Recognition
 
 ```sh
 python -m src.recognize --camera 0 --threshold 0.45 --margin 0.05
 ```
 
-The window displays face boxes, five landmark dots, names, cosine similarity, and processing FPS. Press **Q** or **Escape** to quit. Multiple faces can be processed; CPU speed decreases with each additional face. Faces below 70 pixels across are marked `Too small`.
+The window displays face boxes, five landmark dots, names, cosine similarity, and processing FPS. Press **Q** or **Escape** to quit. Multiple faces can be processed simultaneously.
 
-The best match must meet `--threshold` and exceed the runner-up by `--margin`; otherwise the result is `Unknown`. Higher thresholds accept fewer matches. Scores are similarities, not confidence percentages. The defaults are starting values, not calibrated accuracy guarantees. This implementation processes current frames without temporal identity tracking, so labels may flicker under poor lighting or motion.
+---
 
-## Lock and track one enrolled person
-
-```sh
-python -m src.face_tracking --target "Isaac"
-```
-
-Use the exact enrolled name. This reuses the same YuNet detection, five-point
-alignment, ArcFace model, JSON database, and similarity threshold/margin as
-`src.recognize`. Unknown faces and other enrolled names cannot acquire the lock.
-Only the target gets a box; the window shows `SEARCHING`, `LOCKED`, `UNCERTAIN`, or `LOST`,
-plus the smoothed face position and normalized horizontal/vertical errors.
-There is no current box or position output while the target is missing.
-After more than 24 missed frames, it clears the old geometry and searches for
-the same identity again. Q, Escape, or closing the window exits.
-
-Identity is checked every frame by default. `--verify-every 10` uses the PDF's
-lighter periodic verification, but can briefly follow an unverified face between
-checks. Reappearance after a gap and scenes with multiple eligible faces always
-trigger verification. `--lost-timeout`, `--ema-alpha`, and `--dead-zone` control
-the grace period, position smoothing, and centered region. Existing `--camera`,
-`--db`, `--model`, `--detector`, `--preprocessing`, `--threshold`, and `--margin`
-options are supported. A separate status panel displays position, SMILE/NEUTRAL,
-eye state, session blink count, EAR, smile score, and all tracking/expression
-calibration settings. Missing observations show N/A rather than stale readings.
-Expression analysis runs only on the locked face, before any overlays are drawn.
-
-Brief identity failures on a continuously detected face now retain an orange
-`UNCERTAIN` box for up to five processed frames (`--uncertain-grace 5`). Each
-new box must overlap the previous box by at least 50% IoU. Identity is checked
-every frame during uncertainty; a successful target match restores `LOCKED`.
-A different recognized identity, multiple eligible faces, invalid face alignment,
-or an exhausted grace period drops the lock immediately. Missing detections
-still hide the box and position; reacquisition after a gap requires a target match.
-Use `--uncertain-grace 0` for the previous strict behavior. Grace can briefly
-follow an unknown person occupying the same location; it is continuity evidence,
-not identity confirmation. It cannot recover details absent in a dark camera image.
-
-The panel shows the tracking reason, current detection confidence, and best
-database match similarity (not necessarily the target's score). `Unknown` means
-the match failed the threshold or margin. `N/A` means no valid score was obtained
-on that frame, including frames between scheduled identity checks. Detection
-confidence is shown only for eligible detections; no eligible face can also mean
-the face is smaller than the 70-pixel minimum. These readings help distinguish
-detection failures from identity matching failures when lighting changes.
-
-### Tracking logs
-
-Every tracking run automatically creates a unique CSV file under `data/logs/`
-and prints its path. Use `--log-dir path/to/logs` to choose another directory.
-Files have exactly three columns: `Timestamp`, `Action Type`, and `Description`.
-Timestamps use UTC with an explicit timezone and millisecond precision.
-
-Actions are `SESSION_START`, `TRACKING_SEARCHING`, `TRACKING_LOCKED`,
-`TRACKING_UNCERTAIN`, `TRACKING_LOST`, `ERROR`, and `SESSION_END`. One tracking
-row is saved per processed frame. Its JSON description contains the frame
-number, target, tracking reason, detection confidence, match name and score,
-position/direction, smile status and score, eye state, EAR, blink event, and
-session blink count. Unavailable readings are `null`. The start record contains
-the command settings; the end record distinguishes normal exit, interruption,
-and error. Startup/runtime exceptions are recorded before being propagated.
-
-Rows are flushed as they are written, and previous sessions are never overwritten.
-Logs accumulate until manually archived or removed; recording every frame can
-produce large files on long runs. Forced process termination may omit the final
-session record. A log write failure stops the run with an error. The default log
-directory is ignored by Git. Logs contain readings and names, not images or
-face embeddings.
-
-Install the updated dependencies before running this version. When upgrading an
-older environment, replace its OpenCV package first to avoid two packages owning
-the same `cv2` files:
+## Face Tracking with Identity Lock (Part 2)
 
 ```sh
-python -m pip uninstall -y opencv-python opencv-python-headless
-python -m pip install --upgrade -r requirements.txt
-python -m pip install --force-reinstall --no-deps opencv-contrib-python==4.11.0.86
+python -m src.face_tracking --target "Kaliza"
 ```
 
-The existing FaceMesh extractor uses MediaPipe 0.10.21 and compatible NumPy/OpenCV
-versions pinned in requirements.txt. Tune `--ear-threshold` (0.21),
-`--blink-min-frames` (2), `--blink-max-frames` (7), `--closed-frames` (8),
-`--smile-on` (0.38), and `--smile-off` (0.35) using the displayed readings.
-Blink duration is measured in processed frames, so tune for your actual frame rate.
-Short low-EAR periods display EYES CLOSING; sustained closure displays EYES CLOSED.
-Blink counts increment once upon reopening after 2-7 low-EAR frames. Missing
-landmarks or a lost target reset pending expression state, retaining the session count.
+Use the exact enrolled name. This reuses YuNet detection, five-point alignment, ArcFace model, JSON database, and similarity threshold/margin as `src.recognize`. Unknown faces and other enrolled names cannot acquire the lock.
 
-## Inspect individual stages
+Only the target gets a box; the window shows status (`SEARCHING`, `LOCKED`, `UNCERTAIN`, or `LOST`), position smoothing, normalized horizontal/vertical errors (`error_x`, `error_y`), smile status, eye state, and blink counts.
+
+### Key Features:
+- **Lock Contract & States:** `SEARCHING`, `LOCKED`, `UNCERTAIN`, and `LOST`. Missing detections hold state temporarily before returning to `SEARCHING`.
+- **Periodic Verification:** `--verify-every 10` verifies identity periodically while using IoU geometric association on intermediate frames.
+- **Position Error & Smoothing:** Exponential moving average (`--ema-alpha 0.30`) reduces bounding box center jitter. Centered region dead zone (`--dead-zone 0.07`) prevents rapid oscillation.
+- **Facial Signals:** MediaPipe FaceMesh calculates Eye Aspect Ratio (EAR) for blink detection and sustained eye closure, and mouth ratio for smile detection with hysteresis (`--smile-on 0.38`, `--smile-off 0.35`).
+- **Session Logging:** Logs tracking states, facial signals, position errors, and timestamps to CSV files under `data/logs/`.
+
+---
+
+## Inspect Individual Pipeline Stages
 
 ```sh
-python -m src.camera       # Original camera and FPS demo
-python -m src.detect       # Original Haar box detector demo
-python -m src.landmarks    # YuNet boxes and five points, plus aligned preview
-python -m src.alignment    # Same preview for inspecting 112x112 alignment
-python -m src.embed        # Live embedding dimension and unit norm
+python -m src.camera       # Webcam capture & FPS test
+python -m src.detect       # Haar box detector demo
+python -m src.landmarks    # YuNet boxes & 5 landmarks preview
+python -m src.alignment    # 112x112 similarity transform alignment preview
+python -m src.embed        # ONNX model feature vector extraction
 ```
 
-The original camera/Haar demos retain their `CAMERA_INDEX` constants. The new webcam commands accept `--camera`, `--detector`, `--model`, `--db`, and `--preprocessing` where applicable; use `--help` for details. `python -m src.harr_5pt` is also a landmark preview, preserving the original filename. Haar cascades alone do not provide the five measured landmarks used by the recognition pipeline.
+---
 
-## Evaluate with held-out photos
-
-Collect fresh images in the expected camera conditions, including enrolled people and people absent from the gallery. Use different captures from enrollment. Create a CSV such as `data/evaluation.csv`:
+## Evaluate with Held-Out Photos
 
 ```csv
 path,label
@@ -179,68 +154,69 @@ validation/isaac_01.jpg,isaac
 validation/visitor_01.jpg,Unknown
 ```
 
-Paths are relative to the CSV. Each image must contain exactly one face. `Unknown` is the label for any unenrolled person.
+Run accuracy evaluation against a manifest:
 
 ```sh
 python -m src.evaluate --manifest data/evaluation.csv --threshold 0.45
-python -m src.evaluate --manifest data/evaluation.csv --threshold 0.55
 ```
 
-Compare correct predictions, false accepts of unknown people, false rejects of known people, and wrong identities. Read/detection failures are reported separately and count against total accuracy. Tune on a validation set, then report performance on a separate test set. No evaluation photos or actual enrollments are bundled.
+---
 
-## Structure
+## Project Structure
 
 ```text
-FaceX/
+FaceLocking/
   init_project.py        Directory setup and verified model downloads
   requirements.txt      Runtime dependencies
   models/               YuNet and ArcFace ONNX weights
   data/db/              Local enrollment database
+  data/logs/            Session tracking CSV logs
   src/
-    camera.py           Existing webcam demo
-    detect.py           Existing Haar detector demo
-    landmarks.py        YuNet detector, Face records, drawing
-    alignment.py        Five-point similarity transform
-    embed.py            ONNX inference and normalization
-    database.py         Storage, model compatibility, cosine matching
-    enroll.py           Quality-gated webcam enrollment
-    recognize.py        Webcam recognition
-    evaluate.py         Held-out image evaluation
-    harr_5pt.py          Landmark/alignment preview
-    config.py           Project-relative paths
+    camera.py           Webcam video feed demo
+    detect.py           Haar face detector demo
+    landmarks.py        YuNet detector, face records, and landmark drawing
+    align.py            Five-point similarity transform alignment
+    embed.py            ONNX ArcFace inference & feature normalization
+    database.py         Storage, model compatibility, and cosine similarity matching
+    enroll.py           Quality-gated webcam identity enrollment
+    recognize.py        Real-time webcam face recognition
+    face_tracking.py    Target identity lock, position error tracking, and main HUD
+    face_signals.py     MediaPipe FaceMesh EAR blink count & smile detection
+    event_log.py        Structured session logging to CSV
+    evaluate.py         Held-out image dataset evaluation
+    harr_5pt.py         Landmark and alignment preview
+    config.py           Project paths configuration
     workflow.py         CLI helpers and camera cleanup
-  tests/                Automated mathematical/storage tests
-  book/                 Reference material directory
+  tests/                Automated unit tests
 ```
 
-Run modules with `python -m src.<module>` from the project root, rather than `python src/<module>.py`. Model and database defaults resolve relative to the project, not the shell's working directory.
+---
 
-## Tests
+## Running Tests
+
+Run the complete automated unit test suite:
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-Tests cover known-transform recovery, invalid landmarks/embeddings, database round-trips, replacement, model mismatches, unknown rejection, ambiguity, and camera cleanup. No camera is required. Two additional smoke tests run real model inference when weights are present and skip otherwise.
+Tests cover similarity transformations, database operations, target candidate selection, lost state timeouts, distractor rejection, smile hysteresis, EAR blink counting, and camera resource cleanup.
 
-Development validation: all 10 tests passed with Python 3.12.10, NumPy 2.5.3, OpenCV 4.14.0.94, and ONNX Runtime 1.29.0; `pip check` passed. Webcam 0 successfully returned a 640x480 frame. No face was visible during that check, so a real person's enrollment and recognition accuracy remain to be verified interactively.
+---
 
 ## Troubleshooting
 
 | Symptom | Action |
 | --- | --- |
-| `No Python at ...` | Recreate `.venv` using an installed Python; the original environment is not portable. |
-| Missing/empty model | Run `python init_project.py --download-models`. A zero-byte file or Git LFS pointer is not a model. |
-| Camera cannot open | Close Teams/Zoom/other camera programs, enable desktop camera permissions, or try `--camera 1`. |
-| No window / GUI error | Run in a desktop session and install `opencv-contrib-python` from requirements.txt; remove conflicting OpenCV packages. |
-| Everything is Unknown | Inspect landmarks/alignment, verify preprocessing, improve lighting, and re-enroll before lowering the threshold. |
-| Wrong people accepted | Increase the threshold/margin and evaluate with held-out unknown people. |
-| Model mismatch | Use the original model/settings or enroll again into a separate `--db` file. |
-| Slow recognition | ResNet100 is a large CPU model; reduce people in view or supply a compatible smaller ArcFace model and re-enroll. |
-| Corrupt JSON | Restore a backup or choose a new database path; invalid data is not silently discarded. |
+| `No Python at ...` | Recreate `.venv` using an installed Python (`py -3.12 -m venv .venv`). |
+| Missing/empty model | Run `python init_project.py --download-models`. |
+| Camera cannot open | Close other camera apps (Teams, Zoom), check camera permissions, or try `--camera 1`. |
+| No window / GUI error | Run in a desktop session and verify `opencv-python` / `opencv-contrib-python` is installed. |
+| Target is Unknown | Verify lighting, re-enroll with clean front-facing samples, or tune `--threshold`. |
+| Distractor takes lock | Ensure target identity name is exact; identity verification prevents lock transfer. |
 
-## Reference and limitations
+---
 
-This project follows the modular enrollment/alignment/embedding/recognition architecture in Gabriel Baziramwabo's *Face Recognition with ArcFace ONNX and 5-Point Alignment*, supplied with this project. The implementation uses YuNet for measured landmarks, one JSON database, and held-out image evaluation; its commands and data format differ from the book's Haar/MediaPipe and NPZ examples. The existing `camera.py` and `detect.py` demos are preserved.
+## Reference & Acknowledgments
 
-This is an educational recognition application with no liveness or anti-spoofing check. Enroll people with their consent and protect the local biometric database; it is not encrypted. Do not use a webcam match alone as an access-control decision. `.gitignore` covers new databases, images, and model downloads, but files already tracked by Git remain tracked: the original database and ArcFace placeholder are tracked in this repository, so inspect staged changes before committing real biometric data or large weights.
+This project is built following the identity lock, tracking, and facial gesture architecture described in *Tracking with Identity Lock, Smile, Blink and Position Detection (Part 2)* by Gabriel Baziramwabo (Benax Technologies Ltd & Rwanda Coding Academy).
