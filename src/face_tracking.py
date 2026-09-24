@@ -234,10 +234,10 @@ def status_panel(frame, tracker, position, signals, blink_total, settings):
     panel_width = 390
     view = np.full((max(frame.shape[0], len(lines) * 27 + 20),
                     frame.shape[1] + panel_width, 3), 24, dtype=np.uint8)
-    view[:frame.shape[0], :frame.shape[1]] = frame
+    view[:frame.shape[0], panel_width:] = frame
     for index, text in enumerate(lines):
         color = (0, 220, 160) if index == 0 else (230, 230, 230)
-        cv2.putText(view, text, (frame.shape[1] + 12, 27 * (index + 1)),
+        cv2.putText(view, text, (12, 27 * (index + 1)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 1, cv2.LINE_AA)
     return view
 
