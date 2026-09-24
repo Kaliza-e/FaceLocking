@@ -120,11 +120,18 @@ class LockedFaceTracker:
 
     def update(self, frame):
         self.frame_index += 1
-        self.detection_confidence = self.match_name = self.match_score = None
+        self.detection_confidence = None
         uncertain = False
         faces = [face for face in self.detector.detect(frame) if min(face.box[2:]) >= 70]
-        self.reason = 'No eligible face detected' if not faces else 'Target not verified'
+        if not faces:
+            self.match_name = self.match_score = None
+            self.reason = 'No eligible face detected'
+        else:
+            self.reason = 'Target not verified'
+
         if self.state == LockState.SEARCHING:
+            if not faces:
+                self.match_name = self.match_score = None
             candidate = self.acquire(frame, faces)
         else:
             candidate = self.associate(faces)
@@ -165,6 +172,7 @@ class LockedFaceTracker:
                     self.state = LockState.SEARCHING
                     self.last_box = None
                     self.smooth_center = None
+                    self.match_name = self.match_score = None
             return None, None
 
         if uncertain:
@@ -229,10 +237,8 @@ def status_panel(frame, tracker, position, signals, blink_total, settings):
     view[:frame.shape[0], :frame.shape[1]] = frame
     for index, text in enumerate(lines):
         color = (0, 220, 160) if index == 0 else (230, 230, 230)
-        scale = min(0.55, (panel_width - 24) / max(
-            cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1, 1)[0][0], 1))
         cv2.putText(view, text, (frame.shape[1] + 12, 27 * (index + 1)),
-                    cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 1, cv2.LINE_AA)
     return view
 
 
@@ -242,7 +248,7 @@ def main():
     cli.add_argument('--log-dir', default=str(LOGS), help='Directory for per-session CSV logs')
     cli.add_argument('--threshold', type=float, default=0.45, help='Part 1 cosine similarity threshold')
     cli.add_argument('--margin', type=float, default=0.05)
-    cli.add_argument('--verify-every', type=int, default=1,
+    cli.add_argument('--verify-every', type=int, default=3,
                      help='Identity check interval; larger values can briefly follow an unverified face')
     cli.add_argument('--lost-timeout', type=int, default=24, help='Missed frames allowed before searching again')
     cli.add_argument('--uncertain-grace', type=int, default=5,
