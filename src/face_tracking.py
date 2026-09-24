@@ -269,7 +269,7 @@ def tracking_session(args, cli, log):
     tracker = LockedFaceTracker(args.target, detector, embedder, db,
                                 args.verify_every, args.lost_timeout, args.ema_alpha,
                                 args.dead_zone, args.threshold, args.margin, args.uncertain_grace)
-    window = 'FaceX identity lock'
+    window = 'Face identity lock'
     print(f'Tracking {args.target!r}. Q or Escape quits. Scores use Part 1 cosine matching.')
     blink_total = 0
     with closing(FaceSignalExtractor(
